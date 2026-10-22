@@ -4,7 +4,7 @@
 `specs/base.md` describes a fully client-side web app that shows in real time how much money a meeting costs. The user enters the number of participants and one shared hourly rate. Play starts the meeting, Pause stops and resumes it, and Stop ends it and shows the total. The app must not load anything from the internet. The repo has nothing in it yet except the spec.
 
 ## Approach
-One self-contained file, **`index.html`**, with inline `<style>` and `<script>`. That means vanilla JS, no build step, no CDN, no web fonts (system font stack only), so it works when opened straight from disk (`file://`) or offline.
+One self-contained file, **`app/index.html`**, with inline `<style>` and `<script>`. That means vanilla JS, no build step, no CDN, no web fonts (system font stack only), so it works when opened straight from disk (`file://`) or offline.
 
 ### UI
 - **Setup form:** "Participants" (integer, min 1) and "Hourly rate per participant" (number, min 0, step 0.01). Inputs are locked while a meeting is running or paused.
@@ -27,11 +27,11 @@ One self-contained file, **`index.html`**, with inline `<style>` and `<script>`.
 - Optional nicety: `document.title` shows the current cost so it's visible from the tab bar.
 
 ## Files
-- `index.html`: the whole app (new).
-- `README.md`: a short note on how to use it: open `index.html` in a browser (new, optional).
+- `app/index.html`: the whole app (new).
+- `README.md`: a short note on how to use it: open `app/index.html` in a browser (new, optional).
 
 ## Verification
-1. Open `index.html` directly in a browser. Check in the DevTools Network tab that it makes no external requests, and that it still works with the network turned off.
+1. Open `app/index.html` directly in a browser. Check in the DevTools Network tab that it makes no external requests, and that it still works with the network turned off.
 2. Math check: 6 participants × 100 €/h should give ≈ 10.00 € after 60 s, and 1 × 3600 €/h should add ≈ 1 € per second.
 3. Pause for 10 s, then resume: the counter stays frozen while paused and picks up where it left off without jumping.
 4. Stop: the final total stays fixed, and New meeting resets the counter to 0 while keeping the inputs.

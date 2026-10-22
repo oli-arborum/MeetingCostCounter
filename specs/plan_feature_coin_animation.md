@@ -1,10 +1,10 @@
 # Feature: Falling EUR Coins — Implementation Plan
 
 ## Context
-`specs/feature_coin_animation.md` asks for 1-EUR coins falling in the page background while a meeting runs. The frequency must match the spending rate: 10 participants × 100 EUR/h = 1000 EUR/h means one coin every 3.6 s. The animation should look organic. The app is the single offline file `index.html` (vanilla JS, no external resources), and it must stay that way.
+`specs/feature_coin_animation.md` asks for 1-EUR coins falling in the page background while a meeting runs. The frequency must match the spending rate: 10 participants × 100 EUR/h = 1000 EUR/h means one coin every 3.6 s. The animation should look organic. The app is the single offline file `app/index.html` (vanilla JS, no external resources), and it must stay that way.
 
 ## Approach
-Add everything inside `index.html`: one `<canvas>`, a little CSS and one self-contained `coinRain` module in the existing script. Coins are drawn procedurally on the canvas, with no image assets.
+Add everything inside `app/index.html`: one `<canvas>`, a little CSS and one self-contained `coinRain` module in the existing script. Coins are drawn procedurally on the canvas, with no image assets.
 
 ### Frequency = money spent (exact, drift-free)
 - Coins are tied to the cost itself, not to a separate timer. Track `coinsDropped`. On every frame, `due = Math.floor(elapsedMs() * costPerMs)`, and spawn `due - coinsDropped` coins. So **one coin falls for every full euro spent**.
@@ -32,7 +32,7 @@ A simplified rendering of the 1-EUR common side, drawn procedurally:
 
 To keep it fast, pre-render one coin face per size bucket to an offscreen canvas once, then `drawImage` it with transforms on each frame.
 
-### Integration with the existing code (`index.html`)
+### Integration with the existing code (`app/index.html`)
 - **Markup:** `<canvas id="coins" aria-hidden="true">` as the first child of `body`.
 - **CSS:** `position: fixed; inset: 0; z-index: -1; pointer-events: none;`, and `body` gets `isolation: isolate` so the canvas sits behind the content. Coins use reduced opacity (~0.5) so the counter stays readable. The setup form already has a solid card background.
 - **Canvas size:** set from `devicePixelRatio`, and updated on `resize`.
@@ -46,12 +46,12 @@ To keep it fast, pre-render one coin face per size bucket to an offscreen canvas
 - **Reduced motion:** respect `prefers-reduced-motion: reduce` and turn the animation off entirely.
 
 ## Files
-- `index.html`: canvas, CSS and the `coinRain` module, plus small hooks in `start`, `tick`, `togglePause`, `stop` and `reset`.
+- `app/index.html`: canvas, CSS and the `coinRain` module, plus small hooks in `start`, `tick`, `togglePause`, `stop` and `reset`.
 - `specs/plan_feature_coin_animation.md`: a copy of this plan, matching the earlier `specs/plan.md`.
 - `README.md`: one line mentioning the coin rain.
 
 ## Verification
-1. Open `index.html` offline and check that there are still no network requests.
+1. Open `app/index.html` offline and check that there are still no network requests.
 2. 10 × 100 €/h: a coin about every 3.6 s, so about 16–17 coins after 60 s, matching the counter's whole euros.
 3. 1 × 3600 €/h: about one coin per second, and coins appear exactly when the counter crosses a full euro.
 4. Pause: no new coins and the on-screen coins freeze. Resume: they continue.
