@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MeetingCostCounter</title>
+<style>
+  :root {
+    --bg: #f6f5f2;
+    --fg: #1d1d1f;
+    --muted: #6b6b70;
+    --card: #ffffff;
+    --border: #d9d7d2;
+    --accent: #1f7a4d;
+    --warn: #b7791f;
+    --danger: #b3261e;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141416;
+      --fg: #f2f2f4;
+      --muted: #9a9aa2;
+      --card: #1e1e22;
+      --border: #34343a;
+      --accent: #3fbf7f;
+      --warn: #e0a84a;
+      --danger: #ef6b62;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px;
+  }
+  header { width: 100%; max-width: 960px; }
+  h1 { font-size: 1.1rem; font-weight: 600; margin: 0 0 16px; color: var(--muted); letter-spacing: .02em; }
+
+  form {
+    width: 100%;
+    max-width: 960px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  label { display: flex; flex-direction: column; gap: 6px; flex: 1 1 200px; font-size: .9rem; color: var(--muted); }
+  input {
+    font: inherit;
+    font-size: 1.25rem;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    width: 100%;
+  }
+  input:disabled { opacity: .6; }
+  input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  main {
+    flex: 1;
+    width: 100%;
+    max-width: 1400px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding-block: 24px;
+  }
+  #status { font-size: 1rem; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); min-height: 1.5em; }
+  #status.running { color: var(--accent); }
+  #status.paused { color: var(--warn); }
+  #counter {
+    font-size: clamp(3rem, 14vw, 13rem);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.05;
+    margin: 8px 0;
+    word-break: break-all;
+  }
+  #counter.paused { opacity: .55; }
+  #elapsed { font-size: clamp(1.25rem, 3vw, 2.25rem); font-variant-numeric: tabular-nums; color: var(--muted); }
+  #rate-info { margin-top: 8px; font-size: .95rem; color: var(--muted); min-height: 1.4em; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 32px; }
+  button {
+    font: inherit;
+    font-size: 1.15rem;
+    font-weight: 600;
+    padding: 14px 28px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--fg);
+    cursor: pointer;
+    min-width: 140px;
+  }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #play { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #pause { border-color: var(--warn); color: var(--warn); }
+  #stop { border-color: var(--danger); color: var(--danger); }
+</style>
+</head>
+<body>
+<header>
+  <h1>MeetingCostCounter</h1>
+</header>
+
+<form id="setup" novalidate>
+  <label><span>Participants</span>
+    <input id="participants" type="number" inputmode="numeric" min="1" step="1" value="5" required>
+  </label>
+  <label><span>Hourly rate per participant (<span id="currency-label">EUR</span>)</span>
+    <input id="rate" type="number" inputmode="decimal" min="0" step="0.01" value="100" required>
+  </label>
+</form>
+
+<main>
+  <div id="status" aria-live="polite">Ready</div>
+  <div id="counter" aria-live="off">0</div>
+  <div id="elapsed">00:00:00</div>
+  <div id="rate-info"></div>
+
+  <div class="controls">
+    <button id="play" type="button">▶ Play</button>
+    <button id="pause" type="button" hidden>⏸ Pause</button>
+    <button id="stop" type="button" hidden>■ Stop</button>
+    <button id="reset" type="button" hidden>↺ New meeting</button>
+  </div>
+</main>
+
+<script>
+(() => {
+  'use strict';
+
+  const CURRENCY = 'EUR';
+  const MS_PER_HOUR = 3600000;
+
+  const $ = (id) => document.getElementById(id);
+  const els = {
+    participants: $('participants'),
+    rate: $('rate'),
+    status: $('status'),
+    counter: $('counter'),
+    elapsed: $('elapsed'),
+    rateInfo: $('rate-info'),
+    play: $('play'),
+    pause: $('pause'),
+    stop: $('stop'),
+    reset: $('reset'),
+    setup: $('setup'),
+  };
+
+  const money = new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: CURRENCY,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  $('currency-label').textContent = CURRENCY;
+
+  // state: 'idle' | 'running' | 'paused' | 'stopped'
+  let state = 'idle';
+  let accumulatedMs = 0;
+  let segmentStart = 0;
+  let costPerMs = 0;
+  let rafId = 0;
+
+  function readInputs() {
+    const participants = Number(els.participants.value);
+    const rate = Number(els.rate.value);
+    const valid =
+      els.participants.value.trim() !== '' &&
+      els.rate.value.trim() !== '' &&
+      Number.isInteger(participants) && participants >= 1 &&
+      Number.isFinite(rate) && rate >= 0;
+    return { valid, participants, rate };
+  }
+
+  function elapsedMs() {
+    return accumulatedMs + (state === 'running' ? performance.now() - segmentStart : 0);
+  }
+
+  function formatDuration(ms) {
+    const total = Math.floor(ms / 1000);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    return [h, m, s].map((n) => String(n).padStart(2, '0')).join(':');
+  }
+
+  function render() {
+    const ms = elapsedMs();
+    const cost = money.format(ms * costPerMs);
+    els.counter.textContent = cost;
+    els.elapsed.textContent = formatDuration(ms);
+    document.title = state === 'idle' ? 'MeetingCostCounter' : `${cost} · MeetingCostCounter`;
+  }
+
+  function tick() {
+    render();
+    rafId = requestAnimationFrame(tick);
+  }
+
+  function setState(next) {
+    state = next;
+    cancelAnimationFrame(rafId);
+
+    const locked = state === 'running' || state === 'paused';
+    els.participants.disabled = locked;
+    els.rate.disabled = locked;
+
+    els.play.hidden = state !== 'idle';
+    els.pause.hidden = !locked;
+    els.stop.hidden = !locked;
+    els.reset.hidden = state !== 'stopped';
+    els.pause.textContent = state === 'paused' ? '▶ Resume' : '⏸ Pause';
+
+    els.status.className = state;
+    els.status.textContent = {
+      idle: 'Ready',
+      running: 'Meeting in progress',
+      paused: 'Paused',
+      stopped: 'Total meeting cost',
+    }[state];
+    els.counter.classList.toggle('paused', state === 'paused');
+
+    updatePlayEnabled();
+    if (state === 'running') tick(); else render();
+  }
+
+  function updatePlayEnabled() {
+    const { valid, participants, rate } = readInputs();
+    els.play.disabled = !valid;
+    if (state === 'idle') {
+      els.rateInfo.textContent = valid
+        ? `${money.format(participants * rate)} per hour · ${money.format(participants * rate / 60)} per minute`
+        : 'Enter at least 1 participant and a non-negative hourly rate.';
+    }
+  }
+
+  function start() {
+    const { valid, participants, rate } = readInputs();
+    if (!valid) return;
+    costPerMs = (participants * rate) / MS_PER_HOUR;
+    accumulatedMs = 0;
+    segmentStart = performance.now();
+    setState('running');
+  }
+
+  function togglePause() {
+    if (state === 'running') {
+      accumulatedMs += performance.now() - segmentStart;
+      setState('paused');
+    } else if (state === 'paused') {
+      segmentStart = performance.now();
+      setState('running');
+    }
+  }
+
+  function stop() {
+    if (state === 'running') accumulatedMs += performance.now() - segmentStart;
+    setState('stopped');
+  }
+
+  function reset() {
+    accumulatedMs = 0;
+    costPerMs = 0;
+    setState('idle');
+  }
+
+  els.play.addEventListener('click', start);
+  els.pause.addEventListener('click', togglePause);
+  els.stop.addEventListener('click', stop);
+  els.reset.addEventListener('click', reset);
+  els.participants.addEventListener('input', updatePlayEnabled);
+  els.rate.addEventListener('input', updatePlayEnabled);
+  els.setup.addEventListener('submit', (e) => { e.preventDefault(); if (state === 'idle') start(); });
+  els.setup.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && state === 'idle') { e.preventDefault(); start(); }
+  });
+  document.addEventListener('visibilitychange', () => { if (state === 'running') render(); });
+
+  setState('idle');
+})();
+</script>
+</body>
+</html>
