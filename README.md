@@ -9,6 +9,8 @@ Shows in real time how much a meeting costs. It runs entirely in the browser, ne
 3. **▶ Play** starts the meeting, **⏸ Pause / ▶ Resume** interrupts it and continues it, and **■ Stop** ends it and shows the total.
 4. **↺ New meeting** resets the counter and keeps your inputs.
 
+While the meeting runs, a 1-EUR coin falls in the background for every euro spent (turned off when the system asks for reduced motion).
+
 The currency is set by the `CURRENCY` constant in `index.html` (default `EUR`).
 
 See `specs/base.md` for the specification.

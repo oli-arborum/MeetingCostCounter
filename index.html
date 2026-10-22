@@ -40,6 +40,15 @@
     flex-direction: column;
     align-items: center;
     padding: 24px 16px;
+    isolation: isolate;
+  }
+  #coins {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    pointer-events: none;
   }
   header { width: 100%; max-width: 960px; }
   h1 { font-size: 1.1rem; font-weight: 600; margin: 0 0 16px; color: var(--muted); letter-spacing: .02em; }
@@ -116,6 +125,7 @@
 </style>
 </head>
 <body>
+<canvas id="coins" aria-hidden="true"></canvas>
 <header>
   <h1>MeetingCostCounter</h1>
 </header>
@@ -173,6 +183,272 @@
   });
   $('currency-label').textContent = CURRENCY;
 
+  // Background animation: one 1-EUR coin falls for every full euro spent.
+  const coinRain = (() => {
+    const MAX_LIVE = 200;
+    const MAX_SPAWN_PER_FRAME = 5;
+    const GRAVITY = 300; // px/s²
+
+    const canvas = $('coins');
+    const ctx = canvas.getContext('2d');
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const sprites = new Map(); // rounded diameter (CSS px) -> pre-rendered coin face
+
+    let coins = [];
+    let dropped = 0;
+    let frozen = false;
+    let rafId = 0;
+    let lastT = 0;
+    let w = 0, h = 0, dpr = 1;
+
+    const rand = (min, max) => min + Math.random() * (max - min);
+
+    function resize() {
+      const newDpr = window.devicePixelRatio || 1;
+      if (newDpr !== dpr) sprites.clear();
+      dpr = newDpr;
+      w = window.innerWidth;
+      h = window.innerHeight;
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+      draw();
+    }
+
+    function sprite(size) {
+      const key = Math.round(size / 4) * 4;
+      let s = sprites.get(key);
+      if (s) return s;
+
+      const px = Math.ceil(key * dpr);
+      s = document.createElement('canvas');
+      s.width = s.height = px;
+      const g = s.getContext('2d');
+      const r = px / 2;
+      const ri = r * 0.667; // core / coin diameter of a real 1-EUR coin (15.75 / 23.25 mm)
+      const off = Math.max(0.6, r * 0.022);
+      const TAU = Math.PI * 2;
+
+      const circle = (radius) => { g.beginPath(); g.arc(r, r, radius, 0, TAU); };
+
+      // Paints a relief: light edge up-left, shadow down-right, then the face colour.
+      function emboss(paint, base, light, dark, depth = off) {
+        for (const [dx, colour] of [[-depth, light], [depth, dark], [0, base]]) {
+          g.save();
+          g.translate(dx, dx);
+          g.fillStyle = g.strokeStyle = colour;
+          paint();
+          g.restore();
+        }
+      }
+
+      function star(cx, cy, outer) {
+        g.beginPath();
+        for (let i = 0; i < 10; i++) {
+          const a = -Math.PI / 2 + (i * Math.PI) / 5;
+          const rad = i % 2 ? outer * 0.42 : outer;
+          g.lineTo(cx + Math.cos(a) * rad, cy + Math.sin(a) * rad);
+        }
+        g.closePath();
+        g.fill();
+      }
+
+      // outer ring: nickel brass
+      let grad = g.createRadialGradient(r * 0.62, r * 0.5, r * 0.05, r, r, r);
+      grad.addColorStop(0, '#fff3c4');
+      grad.addColorStop(0.45, '#e6c062');
+      grad.addColorStop(0.8, '#bf8f2f');
+      grad.addColorStop(1, '#7e5b16');
+      g.fillStyle = grad;
+      circle(r); g.fill();
+
+      // milled edge
+      g.strokeStyle = 'rgba(92, 66, 14, 0.55)';
+      g.lineWidth = Math.max(0.5, r * 0.012);
+      for (let i = 0; i < 140; i++) {
+        const a = (i / 140) * TAU;
+        g.beginPath();
+        g.moveTo(r + Math.cos(a) * r * 0.95, r + Math.sin(a) * r * 0.95);
+        g.lineTo(r + Math.cos(a) * r, r + Math.sin(a) * r);
+        g.stroke();
+      }
+
+      // raised outer rim
+      g.lineWidth = Math.max(0.8, r * 0.025);
+      g.strokeStyle = 'rgba(255, 246, 210, 0.75)'; circle(r * 0.925 - off); g.stroke();
+      g.strokeStyle = 'rgba(110, 78, 18, 0.7)'; circle(r * 0.925 + off); g.stroke();
+
+      // inner core: cupronickel
+      grad = g.createRadialGradient(r - ri * 0.4, r - ri * 0.45, ri * 0.05, r, r, ri);
+      grad.addColorStop(0, '#ffffff');
+      grad.addColorStop(0.5, '#d3d6db');
+      grad.addColorStop(0.85, '#a3a7ae');
+      grad.addColorStop(1, '#7c8088');
+      g.fillStyle = grad;
+      circle(ri); g.fill();
+
+      // seam between core and ring
+      g.lineWidth = Math.max(0.8, r * 0.02);
+      g.strokeStyle = 'rgba(70, 60, 40, 0.65)'; circle(ri); g.stroke();
+      g.strokeStyle = 'rgba(255, 250, 225, 0.6)'; circle(ri + off * 1.5); g.stroke();
+
+      // six parallel lines running from the core across the ring to the stars
+      const lineX0 = r + ri * 0.06;
+      const lineX1 = r + r * 0.86;
+      g.save();
+      circle(r * 0.9); g.clip();
+      emboss(() => {
+        g.lineWidth = Math.max(0.6, r * 0.018);
+        for (let i = 0; i < 6; i++) {
+          const y = r + (i - 2.5) * ri * 0.17;
+          g.beginPath(); g.moveTo(lineX0, y); g.lineTo(lineX1, y); g.stroke();
+        }
+      }, 'rgba(120, 112, 98, 0.55)', 'rgba(255, 255, 255, 0.6)', 'rgba(60, 50, 30, 0.45)');
+      g.restore();
+
+      // twelve stars on the right-hand side of the ring
+      const starR = r * 0.8;
+      emboss(() => {
+        for (let i = 0; i < 12; i++) {
+          const a = (-62 + (i * 124) / 11) * (Math.PI / 180);
+          star(r + Math.cos(a) * starR, r + Math.sin(a) * starR, r * 0.065);
+        }
+      }, '#c99b38', 'rgba(255, 246, 205, 0.9)', 'rgba(96, 68, 14, 0.75)');
+
+      // large "1" and "EURO"
+      const font = 'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      emboss(() => {
+        g.font = `800 ${Math.round(ri * 1.35)}px ${font}`;
+        g.fillText('1', r - ri * 0.36, r + ri * 0.05);
+      }, '#b4b8be', 'rgba(255, 255, 255, 0.95)', 'rgba(55, 58, 64, 0.8)');
+      emboss(() => {
+        g.font = `700 ${Math.max(4, Math.round(ri * 0.2))}px ${font}`;
+        g.fillText('EURO', r + ri * 0.4, r + ri * 0.62);
+      }, '#8f939a', 'rgba(255, 255, 255, 0.85)', 'rgba(55, 58, 64, 0.6)', off * 0.4);
+
+      sprites.set(key, s);
+      return s;
+    }
+
+    function spawn() {
+      const z = rand(0.5, 1); // depth: larger, faster and more opaque when near
+      const size = 28 + 56 * (z - 0.5);
+      coins.push({
+        z,
+        size,
+        x0: rand(0, w),
+        x: 0,
+        y: -size,
+        t: 0,
+        vy: rand(20, 60) * z,
+        vTerm: rand(140, 220) * z,
+        swayAmp: rand(8, 30),
+        swayFreq: rand(0.6, 1.6),
+        phase: rand(0, Math.PI * 2),
+        rot: rand(0, Math.PI * 2),
+        vRot: rand(-1, 1),
+        flip: rand(0, Math.PI * 2),
+        vFlip: rand(1.5, 4) * (Math.random() < 0.5 ? -1 : 1),
+      });
+      coins.sort((a, b) => a.z - b.z);
+    }
+
+    function update(dt) {
+      for (const c of coins) {
+        c.t += dt;
+        c.vy = Math.min(c.vTerm, c.vy + GRAVITY * c.z * dt);
+        c.y += c.vy * dt;
+        c.x = c.x0 + Math.sin(c.t * c.swayFreq + c.phase) * c.swayAmp;
+        c.rot += c.vRot * dt;
+        c.flip += c.vFlip * dt;
+      }
+      coins = coins.filter((c) => c.y - c.size < h);
+    }
+
+    function draw() {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (const c of coins) {
+        const half = c.size / 2;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.translate(c.x, c.y);
+        ctx.rotate(c.rot);
+        const sx = Math.max(0.08, Math.abs(Math.cos(c.flip)));
+        ctx.scale(sx, 1);
+        ctx.globalAlpha = 0.3 + 0.3 * (c.z - 0.5) / 0.5;
+
+        // coin edge (thickness ≈ 1/10 of the diameter), visible while the coin is turned
+        const dx = (c.size * 0.1 * Math.sin(c.flip)) / sx;
+        if (Math.abs(dx) > 0.5) {
+          const edge = ctx.createLinearGradient(0, -half, 0, half);
+          edge.addColorStop(0, '#7e5b16');
+          edge.addColorStop(0.35, '#e9c870');
+          edge.addColorStop(1, '#6e4f12');
+          ctx.fillStyle = edge;
+          ctx.fillRect(Math.min(0, dx), -half, Math.abs(dx), c.size);
+          ctx.beginPath(); ctx.arc(dx, 0, half, 0, Math.PI * 2); ctx.fill();
+        }
+
+        ctx.drawImage(sprite(c.size), -half, -half, c.size, c.size);
+
+        // light streak sweeping across the face as the coin turns
+        const pos = (Math.sin(c.flip) + 1) / 2;
+        const shine = ctx.createLinearGradient(-half, -half, half, half);
+        shine.addColorStop(Math.max(0, pos - 0.18), 'rgba(255,255,255,0)');
+        shine.addColorStop(pos, 'rgba(255,255,255,0.5)');
+        shine.addColorStop(Math.min(1, pos + 0.18), 'rgba(255,255,255,0)');
+        ctx.fillStyle = shine;
+        ctx.beginPath(); ctx.arc(0, 0, half, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    function frame(now) {
+      const dt = Math.min(0.05, (now - lastT) / 1000);
+      lastT = now;
+      update(dt);
+      draw();
+      rafId = coins.length && !frozen ? requestAnimationFrame(frame) : 0;
+    }
+
+    function ensureLoop() {
+      if (rafId || frozen || !coins.length) return;
+      lastT = performance.now();
+      rafId = requestAnimationFrame(frame);
+    }
+
+    function reset() {
+      cancelAnimationFrame(rafId);
+      rafId = 0;
+      coins = [];
+      dropped = 0;
+      frozen = false;
+      draw();
+    }
+
+    function sync(euros) {
+      const due = Math.floor(euros);
+      let n = Math.min(due - dropped, MAX_SPAWN_PER_FRAME);
+      dropped = Math.max(dropped, due); // a backlog (e.g. hidden tab) is dropped, not burst out
+      if (reducedMotion.matches) return;
+      while (n-- > 0 && coins.length < MAX_LIVE) spawn();
+      ensureLoop();
+    }
+
+    function freeze(on) {
+      frozen = on;
+      if (frozen) { cancelAnimationFrame(rafId); rafId = 0; }
+      else ensureLoop();
+    }
+
+    window.addEventListener('resize', resize);
+    reducedMotion.addEventListener('change', () => { if (reducedMotion.matches) { coins = []; draw(); } });
+    resize();
+
+    return { reset, sync, freeze };
+  })();
+
   // state: 'idle' | 'running' | 'paused' | 'stopped'
   let state = 'idle';
   let accumulatedMs = 0;
@@ -213,6 +489,7 @@
 
   function tick() {
     render();
+    coinRain.sync(elapsedMs() * costPerMs);
     rafId = requestAnimationFrame(tick);
   }
 
@@ -238,6 +515,7 @@
       stopped: 'Total meeting cost',
     }[state];
     els.counter.classList.toggle('paused', state === 'paused');
+    coinRain.freeze(state === 'paused');
 
     updatePlayEnabled();
     if (state === 'running') tick(); else render();
@@ -259,6 +537,7 @@
     costPerMs = (participants * rate) / MS_PER_HOUR;
     accumulatedMs = 0;
     segmentStart = performance.now();
+    coinRain.reset();
     setState('running');
   }
 
@@ -280,6 +559,7 @@
   function reset() {
     accumulatedMs = 0;
     costPerMs = 0;
+    coinRain.reset();
     setState('idle');
   }
 
